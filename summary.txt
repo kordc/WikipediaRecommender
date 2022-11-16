@@ -1,0 +1,16 @@
+https://en.wikipedia.org/wiki/Jazz number of reasonable links: 863
+Visited neighbours: 
+		https://en.wikipedia.org/wiki/Danish_jazz
+		https://en.wikipedia.org/wiki/Harmonica
+		https://en.wikipedia.org/wiki/The_Headhunters
+		https://en.wikipedia.org/wiki/Max_Roach
+
+
+https://en.wikipedia.org/wiki/Danish_jazz number of reasonable links: 284
+Visited neighbours: 
+		https://en.wikipedia.org/wiki/Big_band
+		https://en.wikipedia.org/wiki/Sacred_jazz
+		https://en.wikipedia.org/wiki/Jesper_Lundgaard
+		https://en.wikipedia.org/wiki/2020_in_jazz
+
+
