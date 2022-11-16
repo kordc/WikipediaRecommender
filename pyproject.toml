@@ -15,7 +15,12 @@ numpy = "^1.23.4"
 networkx = "^2.8.8"
 autopep8 = "^2.0.0"
 nltk = "^3.7"
+ipykernel = "^6.17.1"
 
+
+[tool.poetry.group.dev.dependencies]
+nxviz = "^0.7.4"
+networkx = "^2.8.8"
 
 [build-system]
 requires = ["poetry-core"]
