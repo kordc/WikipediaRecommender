@@ -15,9 +15,11 @@ from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize, wordpunct_tokenize
 
-import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from scipy.spatial.distance import cosine
+from sklearn.decomposition import PCA
 
-np.random.seed(0)
+import matplotlib.pyplot as plt
 
 
 porter = PorterStemmer()
@@ -284,3 +286,81 @@ class BubbleChart:
             ax.add_patch(circ)
             ax.text(*self.bubbles[i, :2], labels[i],
                     horizontalalignment='center', verticalalignment='center')
+
+
+class Ranker:
+    def __init__(self, data):
+        self.docs = data
+        self.docs = data['text']
+
+        self.init_tfidf()
+        self.init_svd()
+        self.init_pca()
+
+    def init_tfidf(self):
+        self.tfidf = TfidfVectorizer(use_idf=True, smooth_idf=False)
+        trans = self.tfidf.fit_transform(self.docs)
+        self.trans_np = trans.toarray()
+        self.dfTFIDF = pd.DataFrame(self.trans_np, index=np.arange(
+            len(self.docs)), columns=self.tfidf.get_feature_names_out())
+
+    def init_svd(self):
+        to_svc = self.trans_np.T
+        u, s, vh = np.linalg.svd(to_svc, full_matrices=False)
+
+        u_c = np.concatenate(u[:, None])
+        vh_c = np.concatenate(vh[:, None])
+        s_shape = (s.shape[0], s.shape[0])
+        s_c = np.zeros(s_shape)
+        s_c[np.arange(s_shape[0]), np.arange(
+            s_shape[0])] = s
+        s_c_inv = np.zeros(s_shape)
+        s_c_inv[np.arange(s_shape[0]), np.arange(
+            s_shape[0])] = 1/s
+
+        reconstruction = u_c @ s_c @ vh_c
+
+        assert np.allclose(to_svc, self.reconstruction) == True
+
+        how_many = (s_c > 1).sum()
+        self.u_c_k = u_c[:, :how_many]
+        self.s_c_inv_k = self.s_c_inv[:how_many, :how_many]
+        vh_c_k = self.vh_c[:how_many, :]
+
+        self.dfSVD = pd.DataFrame(
+            vh_c_k.T, index=np.arange(len(self.docs)))
+
+    def init_pca(self, printing=False):
+        self.pca = PCA(n_components=1000)
+        self.pca.fit(self.trans_np)
+        if printing:
+            print(self.pca.explained_variance_ratio_.sum())
+        docs_transformed = self.pca.transform(self.trans_np)
+        self.dfPCA = pd.DataFrame(
+            docs_transformed, index=np.arange(len(self.docs)))
+
+    def tfidf(self, query):
+        query = self.tfidf.transform([query]).toarray()[0]
+        return 1-self.dfTFIDF.apply(lambda x: cosine(x, query), axis=1)
+
+    def pca(self, query):
+        query = self.tfidf.transform([query]).toarray()[0]
+        query_pca = self.pca.transform(query[None, :])
+        return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca), axis=1)
+
+    def svd(self, query):
+        query = self.tfidf.transform([query]).toarray()[0]
+        query_svd = query @ self.u_c_k @ self.s_c_inv_k
+        return 1-self.dfSVD.apply(lambda x: cosine(x, query_svd), axis=1)
+
+    def rank(self, prev_docs, model='tfidf'):
+        ranks = []
+        if model == 'tfidf':
+            ranks = [self.tfidf(doc) for doc in prev_docs]
+        elif model == 'pca':
+            ranks = [self.pca(doc) for doc in prev_docs]
+        elif model == 'svd':
+            ranks = [self.svd(doc) for doc in prev_docs]
+        else:
+            raise TypeError("pca, svd and tfidf are the only options!")
+        return np.array(ranks).mean()
