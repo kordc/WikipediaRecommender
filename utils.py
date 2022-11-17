@@ -21,6 +21,8 @@ from sklearn.decomposition import PCA
 
 import matplotlib.pyplot as plt
 
+import itertools
+
 
 porter = PorterStemmer()
 lancaster = LancasterStemmer()
@@ -295,7 +297,7 @@ class Ranker:
 
         self.init_tfidf()
         self.init_svd()
-        self.init_pca()
+        # self.init_pca()
 
     def init_tfidf(self):
         self.tfidf = TfidfVectorizer(use_idf=True, smooth_idf=False)
@@ -320,12 +322,12 @@ class Ranker:
 
         reconstruction = u_c @ s_c @ vh_c
 
-        assert np.allclose(to_svc, self.reconstruction) == True
+        assert np.allclose(to_svc, reconstruction) == True
 
         how_many = (s_c > 1).sum()
         self.u_c_k = u_c[:, :how_many]
-        self.s_c_inv_k = self.s_c_inv[:how_many, :how_many]
-        vh_c_k = self.vh_c[:how_many, :]
+        self.s_c_inv_k = s_c_inv[:how_many, :how_many]
+        vh_c_k = vh_c[:how_many, :]
 
         self.dfSVD = pd.DataFrame(
             vh_c_k.T, index=np.arange(len(self.docs)))
@@ -339,28 +341,38 @@ class Ranker:
         self.dfPCA = pd.DataFrame(
             docs_transformed, index=np.arange(len(self.docs)))
 
-    def tfidf(self, query):
+    def tfidf_rank(self, query):
         query = self.tfidf.transform([query]).toarray()[0]
         return 1-self.dfTFIDF.apply(lambda x: cosine(x, query), axis=1)
 
-    def pca(self, query):
+    def pca_rank(self, query):
         query = self.tfidf.transform([query]).toarray()[0]
         query_pca = self.pca.transform(query[None, :])
         return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca), axis=1)
 
-    def svd(self, query):
+    def svd_rank(self, query):
         query = self.tfidf.transform([query]).toarray()[0]
         query_svd = query @ self.u_c_k @ self.s_c_inv_k
         return 1-self.dfSVD.apply(lambda x: cosine(x, query_svd), axis=1)
 
     def rank(self, prev_docs, model='tfidf'):
+        stemmer = CustomStemmer(prev_docs)
+        processed = stemmer.process_corpus()
+
         ranks = []
         if model == 'tfidf':
-            ranks = [self.tfidf(doc) for doc in prev_docs]
+            ranks = [self.tfidf_rank(doc) for doc in processed.values()]
         elif model == 'pca':
-            ranks = [self.pca(doc) for doc in prev_docs]
+            ranks = [self.pca_rank(doc) for doc in processed.values()]
         elif model == 'svd':
-            ranks = [self.svd(doc) for doc in prev_docs]
+            ranks = [self.svd_rank(doc) for doc in processed.values()]
         else:
             raise TypeError("pca, svd and tfidf are the only options!")
-        return np.array(ranks).mean()
+        final_ranking = {doc: x for doc, x in zip(
+            prev_docs.index, np.round((np.array(ranks).mean(axis=0)), decimals=4))}
+        final_ranking = dict(
+            sorted(final_ranking.items(), key=lambda item: item[1], reverse=True))
+        recommended = dict(itertools.islice(
+            final_ranking.items(), min(10, len(processed.values()))))
+
+        return recommended

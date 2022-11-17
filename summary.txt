@@ -1,16 +1,16 @@
 https://en.wikipedia.org/wiki/Jazz number of reasonable links: 863
 Visited neighbours: 
-		https://en.wikipedia.org/wiki/Branford_Marsalis
-		https://en.wikipedia.org/wiki/Jazz_poetry
-		https://en.wikipedia.org/wiki/Chord_progressions
-		https://en.wikipedia.org/wiki/Ken_Peplowski
+		https://en.wikipedia.org/wiki/Wynton_Marsalis
+		https://en.wikipedia.org/wiki/List_of_jazz_clubs
+		https://en.wikipedia.org/wiki/Swing_music
+		https://en.wikipedia.org/wiki/Kenny_Wheeler
 
 
-https://en.wikipedia.org/wiki/Branford_Marsalis number of reasonable links: 295
+https://en.wikipedia.org/wiki/Wynton_Marsalis number of reasonable links: 380
 Visited neighbours: 
-		https://en.wikipedia.org/wiki/Freddie_Hubbard
-		https://en.wikipedia.org/wiki/Bluesiana_Triangle
-		https://en.wikipedia.org/wiki/The_Roots
-		https://en.wikipedia.org/wiki/Oakland_Coliseum_Arena
+		https://en.wikipedia.org/wiki/Najee
+		https://en.wikipedia.org/wiki/Tom_Chapin
+		https://en.wikipedia.org/wiki/Daniel_Barenboim
+		https://en.wikipedia.org/wiki/Grigory_Sokolov
 
 
