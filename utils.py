@@ -22,7 +22,7 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
 import itertools
-
+import dalex as dx
 
 porter = PorterStemmer()
 lancaster = LancasterStemmer()
@@ -30,8 +30,7 @@ wordnet = WordNetLemmatizer()
 
 
 class CustomStemmer():
-    def __init__(self, data, stemmer=LancasterStemmer, tokenizer=word_tokenize, lemmatizer=WordNetLemmatizer, custom_stopwords=stopwords.words('english')):
-        self.data = data
+    def __init__(self, stemmer=LancasterStemmer, tokenizer=word_tokenize, lemmatizer=WordNetLemmatizer, custom_stopwords=stopwords.words('english')):
         self.stemmer = stemmer()
         self.tokenizer = tokenizer
         self.lemmatizer = lemmatizer()
@@ -54,15 +53,15 @@ class CustomStemmer():
 
         return text
 
-    def process_corpus(self):
-        self.processed = {index: self.process_text(
-            element['content']) for index, element in self.data.iterrows()}
-        return self.processed
+    def process_corpus(self, data):
+        processed = {index: self.process_text(
+            element['content']) for index, element in data.iterrows()}
+        return processed
 
-    def generate_csv(self):
-        df = pd.DataFrame(self.processed, index=[0]).T
+    def generate_csv(self, processed, file_name="processed.csv"):
+        df = pd.DataFrame(processed, index=[0]).T
         df.columns = ['text']
-        df.to_csv('processed.csv', columns=['text'])
+        df.to_csv(file_name, columns=['text'])
 
 
 class BFSScraper():
@@ -133,9 +132,6 @@ class BFSScraper():
     def generate_csv(self):
         df = pd.DataFrame(self.pages)
         df.to_csv('text.csv')
-        # with open("text.csv" , 'w', encoding="utf-8") as f:
-        #     for link, page in self.pages.items():
-        #         f.write(f"{link}, {page['content'].strip()}\n")
 
     def bfs(self, starting_link, n=1000):
         self.q.append(starting_link)
@@ -149,11 +145,6 @@ class BFSScraper():
                     self.q.append(link)
 
             sleep(random.random()*3)
-
-
-def generator(texts):
-    while len(texts) < 1500:
-        yield
 
 
 class BubbleChart:
@@ -289,29 +280,51 @@ class BubbleChart:
             ax.text(*self.bubbles[i, :2], labels[i],
                     horizontalalignment='center', verticalalignment='center')
 
+class User:
+    def __init__(self,):
+        self.history = []
+        self.viewed_links = set()
+
+    def add_to_history(self, link , tfidf_repr):
+        if link not in self.viewed_links:
+            self.history.append(tfidf_repr)
+            self.viewed_links.add(link)
 
 class Ranker:
-    def __init__(self, data):
-        self.docs = data
-        self.docs = data['text']
-
+    def __init__(self, data_path, pca_components=500):
+        data = pd.read_csv(data_path, index_col=0)
+        self.links = list(data.index)
+        self.docs = list(data['text'])
+        
         self.init_tfidf()
         self.init_svd()
-        # self.init_pca()
+
+        self.pca_components = pca_components
+        self.init_pca()
+
+        self.stemmer = CustomStemmer()
+
+        self.scoring_methods = {
+            "tfidf": self.tfidf_rank,
+            "pca": self.pca_rank,
+            "svd": self.svd_rank,
+        }
 
     def init_tfidf(self):
         self.tfidf = TfidfVectorizer(use_idf=True, smooth_idf=False)
-        trans = self.tfidf.fit_transform(self.docs)
+        trans = self.tfidf.fit_transform(self.docs) #! norm: l2 by default vectors are normalized
         self.trans_np = trans.toarray()
         self.dfTFIDF = pd.DataFrame(self.trans_np, index=np.arange(
             len(self.docs)), columns=self.tfidf.get_feature_names_out())
 
     def init_svd(self):
-        to_svc = self.trans_np.T
-        u, s, vh = np.linalg.svd(to_svc, full_matrices=False)
+        u, s, vh = np.linalg.svd(self.trans_np.T, full_matrices=False) # calulating svd
 
+        #np svd returns array of rank1 matrices
         u_c = np.concatenate(u[:, None])
         vh_c = np.concatenate(vh[:, None])
+
+        #calculating diagonal matrix with singular values and it's inverse. Numpy returns flattened array
         s_shape = (s.shape[0], s.shape[0])
         s_c = np.zeros(s_shape)
         s_c[np.arange(s_shape[0]), np.arange(
@@ -320,59 +333,126 @@ class Ranker:
         s_c_inv[np.arange(s_shape[0]), np.arange(
             s_shape[0])] = 1/s
 
-        reconstruction = u_c @ s_c @ vh_c
 
-        assert np.allclose(to_svc, reconstruction) == True
-
+        #Selecting only components having singular value bigger than 1
         how_many = (s_c > 1).sum()
         self.u_c_k = u_c[:, :how_many]
         self.s_c_inv_k = s_c_inv[:how_many, :how_many]
-        vh_c_k = vh_c[:how_many, :]
+        vh_c_k = vh_c[:how_many, :] # This matrix represents all documents
 
+        #Conversion to DataFrame so that apply operation is easy
         self.dfSVD = pd.DataFrame(
             vh_c_k.T, index=np.arange(len(self.docs)))
 
     def init_pca(self, printing=False):
-        self.pca = PCA(n_components=1000)
+        #Fit PCA
+        self.pca = PCA(n_components=self.pca_components)
         self.pca.fit(self.trans_np)
         if printing:
-            print(self.pca.explained_variance_ratio_.sum())
+            print(f"Using {self.pca_components} directions we were able to explain: {self.pca.explained_variance_ratio_.sum()}% of variance using PCA")
+        
+        #Transform all documents and create dataframe
         docs_transformed = self.pca.transform(self.trans_np)
         self.dfPCA = pd.DataFrame(
             docs_transformed, index=np.arange(len(self.docs)))
 
-    def tfidf_rank(self, query):
-        query = self.tfidf.transform([query]).toarray()[0]
-        return 1-self.dfTFIDF.apply(lambda x: cosine(x, query), axis=1)
+    def tfidf_query(self, query):
+        return self.tfidf.transform([query]).toarray()[0] # Transform query
 
-    def pca_rank(self, query):
-        query = self.tfidf.transform([query]).toarray()[0]
-        query_pca = self.pca.transform(query[None, :])
-        return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca), axis=1)
+    def tfidf_rank(self, query_tfidf):
+        return 1-self.dfTFIDF.apply(lambda x: cosine(x, query_tfidf), axis=1) # Compute cosine similarity
 
-    def svd_rank(self, query):
-        query = self.tfidf.transform([query]).toarray()[0]
-        query_svd = query @ self.u_c_k @ self.s_c_inv_k
-        return 1-self.dfSVD.apply(lambda x: cosine(x, query_svd), axis=1)
+    def pca_rank(self, query_tfidf):
+        query_pca = self.pca.transform(query_tfidf[None, :]) # Transform query
+        return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca), axis=1) # Compute cosine similarity
 
-    def rank(self, prev_docs, model='tfidf'):
-        stemmer = CustomStemmer(prev_docs)
-        processed = stemmer.process_corpus()
+    def svd_rank(self, query_tfidf):
+        query_svd = query_tfidf @ self.u_c_k @ self.s_c_inv_k
+        return 1-self.dfSVD.apply(lambda x: cosine(x, query_svd), axis=1) # Compute cosine similarity
 
-        ranks = []
-        if model == 'tfidf':
-            ranks = [self.tfidf_rank(doc) for doc in processed.values()]
-        elif model == 'pca':
-            ranks = [self.pca_rank(doc) for doc in processed.values()]
-        elif model == 'svd':
-            ranks = [self.svd_rank(doc) for doc in processed.values()]
-        else:
-            raise TypeError("pca, svd and tfidf are the only options!")
-        final_ranking = {doc: x for doc, x in zip(
-            prev_docs.index, np.round((np.array(ranks).mean(axis=0)), decimals=4))}
-        final_ranking = dict(
-            sorted(final_ranking.items(), key=lambda item: item[1], reverse=True))
-        recommended = dict(itertools.islice(
-            final_ranking.items(), min(10, len(processed.values()))))
 
-        return recommended
+    def get_page(self, link):
+        try:
+            i = self.links.index(link)
+            return self.docs[i]         
+        except ValueError:
+            response = requests.get(link)
+            if response.status_code != 200:
+                raise Exception("Failed to gather data")
+
+            parsed = bs4.BeautifulSoup(response.text, features="html.parser")
+        
+            return "".join([p.getText()
+                            for p in parsed.find(id="mw-content-text").select('p')]).strip()
+
+    def show_recommendations(self, user: User, scores, top_n, scored_link=None):
+        scores_df = {
+            "link" : self.links,
+            "score": list(scores)
+        }
+        scores_df = pd.DataFrame(scores_df).sort_values(by="score", ascending=False)
+
+        shown = 0
+        i = 0
+        while shown < top_n:
+            link, score = scores_df.iloc[i]
+            if link not in user.viewed_links and link != scored_link:
+                print(f"{link}, score: {score}")
+                shown +=1
+            i+=1
+
+    def recommend_based_on_history(self, user: User, model='tfidf', top_n = 10):
+        if user.history is None:
+            print("History of this user is empty. Start from rank_based_on_link")
+            return None
+        
+        scores = [self.scoring_methods[model](doc) for doc in user.history]
+        scores = np.round((np.array(scores).mean(axis=0)), decimals=4)
+        self.show_recommendations(user, scores, top_n)
+
+    
+    def rank_based_on_link(self, user: User, link, model='tfidf', top_n=10):
+        content = self.get_page(link)
+        processed = self.stemmer.process_text(content)
+        query_tfidf = self.tfidf_query(processed)
+        scores = self.scoring_methods[model](query_tfidf)
+
+        self.show_recommendations(user, scores, top_n, scored_link=link)
+
+        user.add_to_history(link, query_tfidf)
+
+    def explain_similarity(self, link1, link2):
+        tfidf1 = self.tfidf_query(self.stemmer.process_text(self.get_page(link1)))
+        tfidf2 = self.tfidf_query(self.stemmer.process_text(self.get_page(link2)))
+
+        elementwise = tfidf1 * tfidf2
+        similarity = elementwise.sum() #cosine similarity is just a dot product due to normalization
+        print(similarity)
+        df = {
+            "variable_name": self.tfidf.get_feature_names_out(),
+            "variable_value":  elementwise,
+            "variable": self.tfidf.get_feature_names_out(),
+            "contribution": elementwise,
+        }
+        df = pd.DataFrame(df).sort_values(by="variable_value", ascending=False)
+        df["cumulative"] = np.cumsum(df["variable_value"])
+        df["sign"] = 1.0
+        df['position'] = np.arange(1, df.shape[0] + 1)[::-1]
+        df['label'] = "Cosine similarity"
+
+        df_last = pd.DataFrame({"variable_name":'', "variable_value":'', "variable": "prediction", "contribution":similarity, 
+                    "cumulative": 0, "sign": 0, "position": 0, "label": "Cosine similarity"}, index= [0] ,columns = df.columns)
+        df_first = pd.DataFrame({"variable_name":"intercept","variable_value":'', "variable": "intercept", "contribution":0, 
+                    "cumulative": 0, "sign": 0, "position": df.shape[0] + 1, "label": "Cosine similarity"}, index=[0], columns = df.columns)
+
+        df = pd.concat([df_first, df, df_last]).reset_index(drop=True)
+
+        bd = dx.predict_explanations._break_down.object.BreakDown()
+        bd.result = df
+        bd.plot()
+
+
+
+
+
+
