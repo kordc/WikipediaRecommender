@@ -13,7 +13,7 @@ from nltk.stem import PorterStemmer
 from nltk.stem import LancasterStemmer
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize, wordpunct_tokenize
+from nltk.tokenize import word_tokenize
 
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from scipy.spatial.distance import cosine
@@ -21,7 +21,6 @@ from sklearn.decomposition import PCA
 
 import matplotlib.pyplot as plt
 
-import itertools
 import dalex as dx
 
 porter = PorterStemmer()
@@ -30,13 +29,34 @@ wordnet = WordNetLemmatizer()
 
 
 class CustomStemmer():
+    """Pipeline for stemming. You can deliver your custom stemmer, tokenizer, lemmatizer and stopwords and these will be used
+    """
     def __init__(self, stemmer=LancasterStemmer, tokenizer=word_tokenize, lemmatizer=WordNetLemmatizer, custom_stopwords=stopwords.words('english')):
+        """
+
+        Args:
+            stemmer (Class, optional): Any class with stem function, it will be instantiated. Defaults to LancasterStemmer.
+            tokenizer (function, optional): Any function performing tokenization. Defaults to word_tokenize.
+            lemmatizer (Class, optional): Any class with lemmatize function. Defaults to WordNetLemmatizer.
+            custom_stopwords (List, optional): List with stopword to be removed. Defaults to nltk.corpus.stopwords.words('english').
+        """
         self.stemmer = stemmer()
         self.tokenizer = tokenizer
         self.lemmatizer = lemmatizer()
         self.custom_stopwords = custom_stopwords
 
-    def process_text(self, text, stem=False, lemmatize=True):
+    def process_text(self, text : str, stem=False, lemmatize=True):
+        """Perform preprocessing of text stages are:
+            tokenization -> removal of nonwords -> removing stopwords -> stemming or lemmatization
+
+        Args:
+            text (str): Text to be processed
+            stem (bool, optional): to perform stemming. Defaults to False.
+            lemmatize (bool, optional): to perform lemmatization. Defaults to True.
+
+        Returns:
+            str: processed text
+        """
         words = self.tokenizer(text)
         final_words = []  # can't use set to preserve order
         for word in words:
@@ -54,18 +74,40 @@ class CustomStemmer():
         return text
 
     def process_corpus(self, data):
+        """Process entire dataframe of text. This supports only DFs where text is stored in column called content.
+
+        Args:
+            data (Pandas.DataFrame): DataFrame it must posses content column with text to be processed.
+
+        Returns:
+            dict: Dictonary where keys are indices from DF and values are processed text from content column
+        """
         processed = {index: self.process_text(
             element['content']) for index, element in data.iterrows()}
         return processed
 
     def generate_csv(self, processed, file_name="processed.csv"):
+        """Saves output of process_corpus stage to csv.
+
+        Args:
+            processed (dict): dictonary returned from process_corpus function
+            file_name (str, optional): Path where csv will be saved. Defaults to "processed.csv".
+        """
         df = pd.DataFrame(processed, index=[0]).T
         df.columns = ['text']
         df.to_csv(file_name, columns=['text'])
 
 
 class BFSScraper():
-    def __init__(self, n_to_visit):
+    """Class performing web scraping in BFS fashion
+    """ 
+    def __init__(self, n_to_visit : int):
+        """
+
+        Args:
+            n_to_visit (int): How many links to visit on a page before moving forward 
+            (This is to be set to omit sitations where page have 2000 links and we take links only from it)
+        """
         self.n_to_visit = n_to_visit
         self.already_visited = set()
         self.q = deque()
@@ -87,6 +129,14 @@ class BFSScraper():
         return new_links
 
     def find_links(self, parsed_page):
+        """Filter of useful wiki links
+
+        Args:
+            parsed_page (BeutifulSoup.soup): Page on which we want to find lists
+
+        Returns:
+            list: list of usefull wikipedia links
+        """
         links = parsed_page.find_all(
             'a', attrs={'href': re.compile(r'^\/wiki\/(?!File)(?!Main_Page)\w*$')})  # To get only wikipedia articles, doen't take files nor something with :, ( etc. Don't go back to main page
 
@@ -96,6 +146,15 @@ class BFSScraper():
         return links
 
     def process_one_link(self, link):
+        """One step of traversal:
+        Gets content of the page -> Find links -> find n unique links to be visited -> get content of currently visited page -> save all data into dictonary
+
+        Args:
+            link (str): link to be visited
+
+        Returns:
+           list:links to be visited next by BFS
+        """
         response = requests.get(link)
         if response.status_code != 200:
             self.pages_with_error_response[link] = response.status_code
@@ -115,11 +174,19 @@ class BFSScraper():
         self.already_visited.add(link)
         return n_not_visited_links
 
-    def dummy_generator(self, n):
+    def dummy_generator(self, n:int):
+        """Just a fancy way to iterate until we have enough pages
+        """
         while len(self.pages) < n:
             yield
 
     def generate_summary(self):
+        """This creates text summary of BFS traversal in a format:
+        visited_link - number of reasonable links: X
+        Visited neighbours: 
+                neighbour1
+                neighbour2....
+        """
         with open("summary.txt", 'w') as f:
             for link, page in self.pages.items():
                 f.write(
@@ -134,6 +201,12 @@ class BFSScraper():
         df.to_csv('text.csv')
 
     def bfs(self, starting_link, n=1000):
+        """Performs bfs traversal over a web until we visit n pages
+
+        Args:
+            starting_link (str):
+            n (int, optional): how many pages to gather. Defaults to 1000.
+        """
         self.q.append(starting_link)
         for _ in (pbar := tqdm.tqdm(self.dummy_generator(n))):
             link_to_scrap = self.q.popleft()
@@ -281,9 +354,11 @@ class BubbleChart:
                     horizontalalignment='center', verticalalignment='center')
 
 class User:
+    """Class for simulating user of our retrieval system. Basically it just storest links visited and it's representation
+    """
     def __init__(self,):
-        self.history = []
-        self.viewed_links = set()
+        self.history = [] # documents in tf-idf represetnation
+        self.viewed_links = set() # visited links
 
     def add_to_history(self, link , tfidf_repr):
         if link not in self.viewed_links:
@@ -291,7 +366,17 @@ class User:
             self.viewed_links.add(link)
 
 class Ranker:
+    """Class that can perform ranking of documents given a user. It can do it based on the link (it simulates situation when user visits something and we recommend next things)
+        or just based on history of the user.
+
+        User can select between 3 representations: original TF-IDF, PCA or SVD
+    """
     def __init__(self, data_path, pca_components=500):
+        """
+        Args:
+            data_path (str): path to csv file with text, it must posses column named text
+            pca_components (int, optional): number of components that will be created by PCA. Defaults to 500.
+        """
         data = pd.read_csv(data_path, index_col=0)
         self.links = list(data.index)
         self.docs = list(data['text'])
@@ -302,7 +387,7 @@ class Ranker:
         self.pca_components = pca_components
         self.init_pca()
 
-        self.stemmer = CustomStemmer()
+        self.stemmer = CustomStemmer() # We need stemmer if one recommends from link
 
         self.scoring_methods = {
             "tfidf": self.tfidf_rank,
@@ -311,6 +396,8 @@ class Ranker:
         }
 
     def init_tfidf(self):
+        """Calculates tf-idf representation of documents and stores them as a data frame to reuse later
+        """
         self.tfidf = TfidfVectorizer(use_idf=True, smooth_idf=False)
         trans = self.tfidf.fit_transform(self.docs) #! norm: l2 by default vectors are normalized
         self.trans_np = trans.toarray()
@@ -318,6 +405,9 @@ class Ranker:
             len(self.docs)), columns=self.tfidf.get_feature_names_out())
 
     def init_svd(self):
+        """Performs CSV decomposition an then selects only concepts with singular values bigger than 1.
+           This creates more compact representation of documents
+        """
         u, s, vh = np.linalg.svd(self.trans_np.T, full_matrices=False) # calulating svd
 
         #np svd returns array of rank1 matrices
@@ -345,7 +435,11 @@ class Ranker:
             vh_c_k.T, index=np.arange(len(self.docs)))
 
     def init_pca(self, printing=False):
-        #Fit PCA
+        """Generates PCA representation of documents, Allows for more compact representation
+
+        Args:
+            printing (bool, optional): If set to True information about explained variance will be printed . Defaults to False.
+        """
         self.pca = PCA(n_components=self.pca_components)
         self.pca.fit(self.trans_np)
         if printing:
@@ -357,21 +451,36 @@ class Ranker:
             docs_transformed, index=np.arange(len(self.docs)))
 
     def tfidf_query(self, query):
+        """Transforms query to tf-idf representation"""
         return self.tfidf.transform([query]).toarray()[0] # Transform query
 
     def tfidf_rank(self, query_tfidf):
+        """Performs rank using tfidf representation"""
         return 1-self.dfTFIDF.apply(lambda x: cosine(x, query_tfidf), axis=1) # Compute cosine similarity
 
     def pca_rank(self, query_tfidf):
+        """Performs rank using PCA representation"""
         query_pca = self.pca.transform(query_tfidf[None, :]) # Transform query
-        return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca), axis=1) # Compute cosine similarity
+        return 1-self.dfPCA.apply(lambda x: cosine(x, query_pca[0]), axis=1) # Compute cosine similarity
 
     def svd_rank(self, query_tfidf):
+        """Performs rank using SVD representation"""
         query_svd = query_tfidf @ self.u_c_k @ self.s_c_inv_k
         return 1-self.dfSVD.apply(lambda x: cosine(x, query_svd), axis=1) # Compute cosine similarity
 
 
     def get_page(self, link):
+        """Just gathers content of given wikipedia article
+
+        Args:
+            link (str): link to wiki article
+
+        Raises:
+            Exception: If response code is different than 2000
+
+        Returns:
+            str: text of the document
+        """
         try:
             i = self.links.index(link)
             return self.docs[i]         
@@ -386,6 +495,14 @@ class Ranker:
                             for p in parsed.find(id="mw-content-text").select('p')]).strip()
 
     def show_recommendations(self, user: User, scores, top_n, scored_link=None):
+        """Given calculated scores it just present ranking to the user. It takes care about amount of links shown and also it excludes links already visited by user
+
+        Args:
+            user (User): User for whom we perform recommendation
+            scores (array):
+            top_n (int): How many links to show
+            scored_link (_type_, optional): Link on which scoring was performed to exclude it. Defaults to None.
+        """
         scores_df = {
             "link" : self.links,
             "score": list(scores)
@@ -402,6 +519,13 @@ class Ranker:
             i+=1
 
     def recommend_based_on_history(self, user: User, model='tfidf', top_n = 10):
+        """Calculate score between user history and our corpora of textts and then shown recommendations
+
+        Args:
+            user (User): 
+            model (str, optional): Which model to chose can be pcs, svd or tfidf. Defaults to 'tfidf'.
+            top_n (int, optional): . Defaults to 10.
+        """
         if user.history is None:
             print("History of this user is empty. Start from rank_based_on_link")
             return None
@@ -412,6 +536,14 @@ class Ranker:
 
     
     def rank_based_on_link(self, user: User, link, model='tfidf', top_n=10):
+        """Shows pages similar to given link. Additionally ads this link to visiting history
+
+        Args:
+            user (User): 
+            link (str): link to wikipedia article
+            model (str, optional): pca,svd or tfidf. Defaults to 'tfidf'.
+            top_n (int, optional): . Defaults to 10.
+        """
         content = self.get_page(link)
         processed = self.stemmer.process_text(content)
         query_tfidf = self.tfidf_query(processed)
@@ -422,6 +554,12 @@ class Ranker:
         user.add_to_history(link, query_tfidf)
 
     def explain_similarity(self, link1, link2):
+        """Hacky function to make dalex show breakdown plots of our cosine similarity
+
+        Args:
+            link1 (str): link to article 1
+            link2 (str): link to article 2
+        """
         tfidf1 = self.tfidf_query(self.stemmer.process_text(self.get_page(link1)))
         tfidf2 = self.tfidf_query(self.stemmer.process_text(self.get_page(link2)))
 
