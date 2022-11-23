@@ -535,7 +535,7 @@ class Ranker:
         self.show_recommendations(user, scores, top_n)
 
     
-    def rank_based_on_link(self, user: User, link, model='tfidf', top_n=10):
+    def rank_based_on_link(self, user: User, link, model='tfidf', top_n=10, prints=True):
         """Shows pages similar to given link. Additionally ads this link to visiting history
 
         Args:
@@ -549,7 +549,8 @@ class Ranker:
         query_tfidf = self.tfidf_query(processed)
         scores = self.scoring_methods[model](query_tfidf)
 
-        self.show_recommendations(user, scores, top_n, scored_link=link)
+        if prints:
+            self.show_recommendations(user, scores, top_n, scored_link=link)
 
         user.add_to_history(link, query_tfidf)
 
