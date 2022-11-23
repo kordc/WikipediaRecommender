@@ -43,7 +43,7 @@ class CustomStemmer():
             if re.match(r'^[A-Za-z]*$', word):
                 final_words.append(word)
         cleaned = [
-            word for word in final_words if word not in self.custom_stopwords]
+            word for word in final_words if word.lower() not in self.custom_stopwords]
 
         text = ' '.join(cleaned)
         if stem:
